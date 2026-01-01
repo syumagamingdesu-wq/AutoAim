@@ -1,23 +1,58 @@
-local OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/jadpy/suki/refs/heads/main/orion"))()
-local Window = OrionLib:MakeWindow({Name = "AvS 2: FULL AUTO", HidePremium = true, SaveConfig = false})
-
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- 設定
+-- 設定変数
 local Aiming = false
-local FOV_Radius = 400 -- スマホだと広めがおすすめ
-local LockedTarget = nil
+local TeamCheck = true 
 
--- ターゲット確認（生存・チーム・距離）
-local function isTargetValid(target)
-    if target and target.Character and target.Character:FindFirstChild("Head") and target.Character:FindFirstChild("Humanoid") then
-        if target.Character.Humanoid.Health > 0 then
-            -- 距離チェック（遠すぎると外す設定も可能）
-            local dist = (target.Character.Head.Position - Camera.CFrame.Position).Magnitude
-            if dist < 500 then 
+-- --- UI作成 (微調整した位置) ---
+local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+local MainBtn = Instance.new("TextButton", ScreenGui)
+local TeamBtn = Instance.new("TextButton", ScreenGui)
+
+-- メインボタン (LOCK ON/OFF)
+MainBtn.Name = "MiniLock"
+MainBtn.Size = UDim2.new(0, 80, 0, 30)
+-- 位置を -180 から -150 に戻して若干右へ
+MainBtn.Position = UDim2.new(1, -150, 0, 0) 
+MainBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+MainBtn.Text = "LOCK: OFF"
+MainBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MainBtn.Font = Enum.Font.SourceSansBold
+MainBtn.TextSize = 14
+Instance.new("UICorner", MainBtn).CornerRadius = UDim.new(0, 8)
+
+-- チーム切り替えボタン (メインボタンのすぐ下)
+TeamBtn.Name = "TeamSwitch"
+TeamBtn.Size = UDim2.new(0, 80, 0, 30)
+TeamBtn.Position = UDim2.new(1, -150, 0, 32)
+TeamBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 255)
+TeamBtn.Text = "TEAM: ON"
+TeamBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+TeamBtn.Font = Enum.Font.SourceSansBold
+TeamBtn.TextSize = 14
+Instance.new("UICorner", TeamBtn).CornerRadius = UDim.new(0, 8)
+
+-- ボタン操作
+MainBtn.MouseButton1Click:Connect(function()
+    Aiming = not Aiming
+    MainBtn.BackgroundColor3 = Aiming and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
+    MainBtn.Text = Aiming and "LOCK: ON" or "LOCK: OFF"
+end)
+
+TeamBtn.MouseButton1Click:Connect(function()
+    TeamCheck = not TeamCheck
+    TeamBtn.BackgroundColor3 = TeamCheck and Color3.fromRGB(50, 50, 255) or Color3.fromRGB(150, 150, 150)
+    TeamBtn.Text = TeamCheck and "TEAM: ON" or "TEAM: OFF"
+end)
+
+-- --- ターゲット判定 (360°対応) ---
+local function isTargetValid(v)
+    if v and v.Character and v.Character:FindFirstChild("Head") and v.Character:FindFirstChild("Humanoid") then
+        if v.Character.Humanoid.Health > 0 and v ~= LocalPlayer then
+            if not TeamCheck or v.Team ~= LocalPlayer.Team then
                 return true
             end
         end
@@ -25,58 +60,28 @@ local function isTargetValid(target)
     return false
 end
 
--- ターゲット取得（画面中央からの距離で判定）
-local function getNewTarget()
-    local closest = nil
-    local shortestDist = FOV_Radius
-    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
+-- --- 360°全方位から「自分に物理的に最も近い」人を探す ---
+local function getClosestPlayer360()
+    local closest, shortestDistance = nil, math.huge
     for _, v in pairs(Players:GetPlayers()) do
-        if v ~= LocalPlayer and isTargetValid(v) then
-            if v.Team ~= LocalPlayer.Team then
-                local pos, onScreen = Camera:WorldToViewportPoint(v.Character.Head.Position)
-                if onScreen then
-                    local magnitude = (Vector2.new(pos.X, pos.Y) - center).Magnitude
-                    if magnitude < shortestDist then
-                        shortestDist = magnitude
-                        closest = v
-                    end
-                end
+        if isTargetValid(v) then
+            local actualDist = (v.Character.Head.Position - LocalPlayer.Character.Head.Position).Magnitude
+            if actualDist < shortestDistance then
+                shortestDistance = actualDist
+                closest = v
             end
         end
     end
     return closest
 end
 
--- UI
-local MainTab = Window:MakeTab({Name = "Main", Icon = "rbxassetid://4483345998"})
-
-MainTab:AddToggle({
-    Name = "Full Auto Lock (No Touch)",
-    Default = false,
-    Callback = function(Value) 
-        Aiming = Value 
-        if not Value then LockedTarget = nil end
-    end    
-})
-
--- 【核心】指を離していても強制的にカメラを回すループ
+-- --- メインループ ---
 RunService.RenderStepped:Connect(function()
     if Aiming then
-        -- ロック対象の更新
-        if not isTargetValid(LockedTarget) then
-            LockedTarget = getNewTarget()
-        end
-
-        if LockedTarget then
-            -- 敵の頭の位置を計算
-            local targetPos = LockedTarget.Character.Head.Position
-            
-            -- 現在のカメラ位置を維持しつつ、向きだけを敵に固定
-            -- これを RenderStepped で行うことで指の入力を無視して回ります
-            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+        local currentTarget = getClosestPlayer360()
+        if currentTarget then
+            -- 360°全方位認識＋常に一番近いプレイヤーへ吸い付き
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, currentTarget.Character.Head.Position)
         end
     end
 end)
-
-OrionLib:Init()
